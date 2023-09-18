@@ -16,3 +16,5 @@ Analyzes AdminSDHolder ACL permissions, shows the timestamp of the last update, 
 .EXAMPLE<br>
 .\Invoke-AdminSDHolderPermissionCheck.ps1 -PreviousCSVFile C:\temp\AdminSDHolder_Permissions_ADATUM_17092023.csv<br>
 Analyzes current AdminSDHolder permissions & compares them with the data from the specified CSV file. Previous CSV must be from a previous run of this script, or exact structure/headers.
+
+![Sample run of the script](comparing_permissions_screenshot.png)
