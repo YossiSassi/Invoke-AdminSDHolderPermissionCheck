@@ -8,8 +8,8 @@ Can run without parameters to dump current permissions to CSV, or compare permis
 <br><br>
 .PARAMETER PreviousCSVFile<br>
 Full path to a CSV file from previous run of the script, to compare with the current online permissions of the AdminSDHolder object.
-<br<br>
-.PARAMETER OptionalCheckForDCsEventLog
+<br><br>
+.PARAMETER OptionalCheckForDCsEventLog<br>
 If specified, will also check for DC Security Event Logs (Requires 'Event Log Readers' permission or privileged).
 <br><br>
 .EXAMPLE<br>
