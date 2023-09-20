@@ -1,7 +1,7 @@
 ﻿<# 
 Invoke-AdminSDHolderPermissionCheck - Analyzes AdminSDHolder permissions & compares with a previous run, to detect potential backdoor/excessive persistent permission(s).
 Comments to yossis@protonmail.com 
-v1.0
+v1.1 - added Option to check Security event logs as well for event 5136 (usually not practical due to log retention, better collect in SIEM, yet can be helpful close to a suspicious attempt)
 #>
 
 #Requires -Modules ActiveDirectory
@@ -18,6 +18,9 @@ Can run without parameters to dump current permissions to CSV, or compare permis
 .PARAMETER PreviousCSVFile
 Full path to a CSV file from previous run of the script, to compare with the current online permissions of the AdminSDHolder object.
 
+.PARAMETER OptionalCheckForDCsEventLog
+If specified, will also check for DC Security Event Logs (Requires 'Event Log Readers' permission or privileged).
+
 .EXAMPLE
 .\Invoke-AdminSDHolderPermissionCheck.ps1
 Analyzes AdminSDHolder ACL permissions, shows the timestamp of the last update, and saves permissions to a csv file.
@@ -25,6 +28,10 @@ Analyzes AdminSDHolder ACL permissions, shows the timestamp of the last update, 
 .EXAMPLE
 .\Invoke-AdminSDHolderPermissionCheck.ps1 -PreviousCSVFile C:\temp\AdminSDHolder_Permissions_ADATUM_17092023.csv
 Analyzes current AdminSDHolder permissions & compares them with the data from the specified CSV file. Previous CSV must be from a previous run of this script, or exact structure/headers.
+
+.EXAMPLE
+.\Invoke-AdminSDHolderPermissionCheck.ps1 -PreviousCSVFile C:\temp\AdminSDHolder_Permissions_ADATUM_17092023.csv -OptionalCheckForDCsEventLog
+Analyzes current AdminSDHolder permissions & compares them with the data from the specified CSV file. Previous CSV must be from a previous run of this script, or exact structure/headers.In addition, check Security event logs on DCs for additional information -e.g. who made the change for the ACL (Requires 'Event Log Readers' permission or other privileged).
 
 .NOTES
 Author: Yossi Sassi (@yossi_sassi), 10Root Cyber Security
@@ -34,10 +41,11 @@ www.hacktivedirectory.com
 #>
 
 param (
-    [string]$PreviousCSVFile = [system.string]::Empty
+    [string]$PreviousCSVFile = [system.string]::Empty,
+    [switch]$OptionalCheckForDCsEventLog
 )
 
-# functions
+# helper functions
 function Compare-CSV {
     param (
         [string]$FilePath1,
@@ -78,7 +86,7 @@ $ACLObj = $Obj.psbase.ObjectSecurity;
 Write-Host "[*] Got object: $($Obj.distinguishedName)" -ForegroundColor Gray;
 
 # Display last modification & version
-$ADminSDHolderReplObj = Get-ADObject -Identity "CN=AdminSDHolder,CN=System,$((Get-ADRootDSE).defaultNamingContext)" | Get-ADReplicationAttributeMetadata -Server $($ENV:LOGONSERVER).Replace("\\","");
+$ADminSDHolderReplObj = Get-ADObject -Identity "CN=AdminSDHolder,CN=System,$((Get-ADRootDSE).defaultNamingContext)" | Get-ADReplicationAttributeMetadata -Server "$((Get-ADDomainController -Discover).hostname)";
 $ADminSDHolderSecDescriptor = $ADminSDHolderReplObj | where attributename -eq "ntSecurityDescriptor";
 write-host "[*] Last modified: $($ADminSDHolderSecDescriptor | select version, LastOriginatingChangeTime)" -ForegroundColor Cyan;
 
@@ -9655,3 +9663,38 @@ if ($Compare)
             Write-Host "[*] No differences found between the CSV files." -ForegroundColor DarkGreen
         }
     }
+
+# If optional switch <OptionalCheckForDCsEventLog> was specified ->
+if ($OptionalCheckForDCsEventLog) {
+    Write-Host "[!] Option to check for additional info at DC event logs was specified (please wait...)" -ForegroundColor Yellow;
+    
+    $DCs = Get-ADDomainController -Filter * | select -ExpandProperty name;
+    
+    $ErrorActionPreference = "Stop";
+
+    try {
+    $DCs | foreach {
+    $DC = $_;
+    if (Get-WinEvent -FilterHashtable @{logname='security';id=5136} -ComputerName $DC -MaxEvents 1) {
+        $Event5136 = Get-WinEvent -FilterHashtable @{logname='security';id=5136} -ComputerName $DC | Where-Object {$_.message -like "*CN=AdminSDHolder*"}
+        Write-Host "[*] Found $($Event5136.count) relevant DS Object changes events at DC -> $($DC.ToUpper())" -ForegroundColor Cyan;
+        $Event5136 | foreach {
+                "Time Created: $($_.TimeCreated)"
+                $Event = ([xml]$_.toxml()).Event.EventData.Data;
+                "$($Event[2].Name): $($Event[2].'#text')";
+                "$($Event[3].Name): $($Event[3].'#text')";
+                "$($Event[8].Name): $($Event[8].'#text')";
+                "$($Event[11].Name): $($Event[11].'#text')";
+                "SDDL ->`n$((ConvertFrom-SddlString $Event[13].'#text').DiscretionaryAcl)`n"
+            }
+    }
+    else
+        {
+        Write-Host "[!] event ID 5136 was not found/is not collected on $($DC.ToUpper()) (DS object changes)" -ForegroundColor Magenta
+        }
+    }
+}
+    catch {
+        Write-Warning "$($Error[0].Exception.Message)"
+    }
+}
