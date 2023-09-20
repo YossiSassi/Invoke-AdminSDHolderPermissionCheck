@@ -1,5 +1,5 @@
 # Invoke-AdminSDHolderPermissionCheck
-Analyzes AdminSDHolder permissions &amp; compares with a previous run, to detect potential backdoor/excessive persistent permission(s)
+Analyzes AdminSDHolder permissions &amp; compares with a previous run, to detect potential backdoor/excessive persistent permission(s).<br>Does not require any special permissions to query and dump the permissions to CSV, as well as compare them.<br>If option to check for additional info from DC event logs is specified, then requires 'Event Log Readers' or equivalent permission.<br>Requires ActiveDirectory powershell module.<br>
 
 .DESCRIPTION<br>
 Analyzes AdminSDHolder ACL permissions & saves them, as well as checks for changes from a previous run. 
