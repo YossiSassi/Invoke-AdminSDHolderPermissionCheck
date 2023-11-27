@@ -1,6 +1,7 @@
 ﻿<# 
 Invoke-AdminSDHolderPermissionCheck - Analyzes AdminSDHolder permissions & compares with a previous run, to detect potential backdoor/excessive persistent permission(s).
 Comments to yossis@protonmail.com 
+v1.2 - added Option to open the permissions in a Grid
 v1.1 - added Option to check Security event logs as well for event 5136 (usually not practical due to log retention, better collect in SIEM, yet can be helpful close to a suspicious attempt)
 #>
 
@@ -20,6 +21,9 @@ Full path to a CSV file from previous run of the script, to compare with the cur
 
 .PARAMETER OptionalCheckForDCsEventLog
 If specified, will also check for DC Security Event Logs (Requires 'Event Log Readers' permission or privileged).
+
+.PARAMETER OpenPermissionsInGrid
+Optional switch to show the current AdminSDHolder Security Descriptor permissions & trustees in a grid.
 
 .EXAMPLE
 .\Invoke-AdminSDHolderPermissionCheck.ps1
@@ -42,7 +46,8 @@ www.hacktivedirectory.com
 
 param (
     [string]$PreviousCSVFile = [system.string]::Empty,
-    [switch]$OptionalCheckForDCsEventLog
+    [switch]$OptionalCheckForDCsEventLog,
+    [switch]$OpenPermissionsInGrid
 )
 
 # helper functions
@@ -9645,7 +9650,7 @@ if ($Permissions)
         $CSVFile = "$((Get-Location).Path)\AdminSDHolder_Permissions_$($ENV:USERDOMAIN)_$(Get-Date -Format ddMMyyyy).csv";
 		$Permissions | ConvertTo-CSV | Out-File $CSVFile;
         Write-Host "[*] Current permissions saved to $CSVFile" -ForegroundColor Green;
-        Write-Host "[!] Optional note: the SHA256 of the current permissions CSV file, for integrity ->" -ForegroundColor Gray;
+        Write-Host "[!] Optional note: Keep this SHA256 value of the current permissions CSV file, for integrity check ->" -ForegroundColor Gray;
         Write-Host $((Get-FileHash $CSVFile -Algorithm SHA256).hash) -ForegroundColor Magenta
 	}
 
@@ -9663,6 +9668,12 @@ if ($Compare)
             Write-Host "[*] No differences found between the CSV files." -ForegroundColor DarkGreen
         }
     }
+
+# If optional switch <OpenPermissionsInGrid> was specified
+If ($OpenPermissionsInGrid)
+	{
+	Import-CSV $CSVFile | Out-GridView -Title "AdminSDHolder Permissions"
+}
 
 # If optional switch <OptionalCheckForDCsEventLog> was specified ->
 if ($OptionalCheckForDCsEventLog) {
