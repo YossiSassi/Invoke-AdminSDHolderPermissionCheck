@@ -1,7 +1,8 @@
 ﻿<# 
 Invoke-AdminSDHolderPermissionCheck - Analyzes AdminSDHolder permissions & compares with a previous run, to detect potential backdoor/excessive persistent permission(s).
 Comments to yossis@protonmail.com 
-v1.3 - Changed the default run to check against a default installation baseline of permissions (thanks AdiM for the feedback!)
+v1.3.1 - Fixed backward compatibility issue with CSVs generated prior to v1.3
+v1.3 - Changed the default run to check against a default installation baseline of permissions
 v1.2 - added Option to open the permissions in a Grid
 v1.1 - added Option to check Security event logs as well for event 5136 (usually not practical due to log retention, better collect in SIEM, yet can be helpful close to a suspicious attempt)
 #>
@@ -67,7 +68,20 @@ function Compare-CSV {
     # Previous (to compare against)
     if ($CompareToOtherCSV)
         {
-            $csv2 = Get-Content $FilePath2 | ConvertFrom-Csv
+            $csv2temp = Get-Content $FilePath2 | ConvertFrom-Csv;
+
+            # backward compatability fix for older CSVs before v1.3
+            if ($csv2temp | Get-Member -Name 'PermissionType|Attribute') 
+                {
+                    $csv2 = $csv2temp | ForEach-Object {
+                        [PSCustomObject]@{
+                            Account = $_.Account
+                            AccessControlType = $_.AccessControlType
+                            Permission = $_.Permission
+                            'PermissionType-or-Attribute' = $_.'PermissionType|Attribute'
+                        }
+                    }
+                }
         }
     else
         {
@@ -81,7 +95,7 @@ function Compare-CSV {
     $headers2 = $csv2[0].PSObject.Properties.Name
 
     if (compare $headers1 $headers2) {
-        Write-Warning "Headers do not match."
+        Write-Warning "[!] Headers Do Not Match!"
     }
 
     # Compare data
@@ -139,7 +153,7 @@ $Permissions = $ACLObj.Access | Select-Object `
         @{n='Account'; e={$_.IdentityReference}},
         AccessControlType,
         @{n='Permission'; e={$_.ActiveDirectoryRights}},
-        @{n='PermissionType|Attribute';e={$ObjAccessType = $_.ObjectType;
+        @{n='PermissionType-or-Attribute';e={$ObjAccessType = $_.ObjectType;
             switch ($_.ObjectType)
                 {
                     # https://docs.microsoft.com/en-us/previous-versions/tn-archive/ff405676(v=msdn.10)?redirectedfrom=MSDN
@@ -9678,33 +9692,33 @@ if ($DomainNetBIOS.Length -le 0)
 
 $DefaultBaseLineCSVData = @();
 $DefaultBaseLineCSVData+='#TYPE Selected.System.DirectoryServices.ActiveDirectoryAccessRule';
-$DefaultBaseLineCSVData+="Account,AccessControlType,Permission,PermissionType|Attribute";
-$DefaultBaseLineCSVData+="NT AUTHORITY\Authenticated Users,Allow,GenericRead,00000000-0000-0000-0000-000000000000";
-$DefaultBaseLineCSVData+="NT AUTHORITY\SYSTEM,Allow,GenericAll,00000000-0000-0000-0000-000000000000";
-$DefaultBaseLineCSVData+="BUILTIN\Administrators,Allow,CreateChild,DeleteChild,Self,WriteProperty,ExtendedRight,Delete,GenericRead,WriteDacl,WriteOwner,00000000-0000-0000-0000-000000000000";
-$DefaultBaseLineCSVData+="$DomainNetBIOS\Domain Admins,Allow,CreateChild,DeleteChild,Self,WriteProperty,ExtendedRight,GenericRead,WriteDacl,WriteOwner,00000000-0000-0000-0000-000000000000";
-$DefaultBaseLineCSVData+="$DomainNetBIOS\Enterprise Admins,Allow,CreateChild,DeleteChild,Self,WriteProperty,ExtendedRight,GenericRead,WriteDacl,WriteOwner,00000000-0000-0000-0000-000000000000";
-$DefaultBaseLineCSVData+="Everyone,Allow,ExtendedRight,User-Change-Password";
-$DefaultBaseLineCSVData+="NT AUTHORITY\SELF,Allow,ReadProperty,WriteProperty,ExtendedRight,Private-Information";
-$DefaultBaseLineCSVData+="NT AUTHORITY\SELF,Allow,ExtendedRight,User-Change-Password";
-$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,RAS-Information";
-$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,RAS-Information";
-$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,User-Account-Restrictions";
-$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,General-Information";
-$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,Membership";
-$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,Membership";
-$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,GenericRead,00000000-0000-0000-0000-000000000000";
-$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,GenericRead,00000000-0000-0000-0000-000000000000";
-$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,General-Information";
-$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,User-Logon";
-$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,User-Account-Restrictions";
-$DefaultBaseLineCSVData+="BUILTIN\Windows Authorization Access Group,Allow,ReadProperty,attributeSchema";
-$DefaultBaseLineCSVData+="BUILTIN\Terminal Server License Servers,Allow,ReadProperty,WriteProperty,attributeSchema";
-$DefaultBaseLineCSVData+="BUILTIN\Terminal Server License Servers,Allow,ReadProperty,WriteProperty,Terminal-Server-License-Server";
-$DefaultBaseLineCSVData+="$DomainNetBIOS\Cert Publishers,Allow,ReadProperty,WriteProperty,attributeSchema";
+$DefaultBaseLineCSVData+="Account|AccessControlType|Permission|PermissionType-or-Attribute";
+$DefaultBaseLineCSVData+="NT AUTHORITY\Authenticated Users|Allow|GenericRead|00000000-0000-0000-0000-000000000000"
+$DefaultBaseLineCSVData+="NT AUTHORITY\SYSTEM|Allow|GenericAll|00000000-0000-0000-0000-000000000000"
+$DefaultBaseLineCSVData+="BUILTIN\Administrators|Allow|CreateChild, DeleteChild, Self, WriteProperty, ExtendedRight, Delete, GenericRead, WriteDacl, WriteOwner|00000000-0000-0000-0000-000000000000"
+$DefaultBaseLineCSVData+="$DomainNetBIOS\Domain Admins|Allow|CreateChild, DeleteChild, Self, WriteProperty, ExtendedRight, GenericRead, WriteDacl, WriteOwner|00000000-0000-0000-0000-000000000000"
+$DefaultBaseLineCSVData+="$DomainNetBIOS\Enterprise Admins|Allow|CreateChild, DeleteChild, Self, WriteProperty, ExtendedRight, GenericRead, WriteDacl, WriteOwner|00000000-0000-0000-0000-000000000000"
+$DefaultBaseLineCSVData+="Everyone|Allow|ExtendedRight|User-Change-Password"
+$DefaultBaseLineCSVData+="NT AUTHORITY\SELF|Allow|ReadProperty, WriteProperty, ExtendedRight|Private-Information"
+$DefaultBaseLineCSVData+="NT AUTHORITY\SELF|Allow|ExtendedRight|User-Change-Password"
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access|Allow|ReadProperty|RAS-Information"
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access|Allow|ReadProperty|RAS-Information"
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access|Allow|ReadProperty|User-Account-Restrictions"
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access|Allow|ReadProperty|General-Information"
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access|Allow|ReadProperty|Membership"
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access|Allow|ReadProperty|Membership"
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access|Allow|GenericRead|00000000-0000-0000-0000-000000000000"
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access|Allow|GenericRead|00000000-0000-0000-0000-000000000000"
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access|Allow|ReadProperty|General-Information"
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access|Allow|ReadProperty|User-Logon"
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access|Allow|ReadProperty|User-Account-Restrictions"
+$DefaultBaseLineCSVData+="BUILTIN\Windows Authorization Access Group|Allow|ReadProperty|attributeSchema"
+$DefaultBaseLineCSVData+="BUILTIN\Terminal Server License Servers|Allow|ReadProperty, WriteProperty|attributeSchema"
+$DefaultBaseLineCSVData+="BUILTIN\Terminal Server License Servers|Allow|ReadProperty, WriteProperty|Terminal-Server-License-Server"
+$DefaultBaseLineCSVData+="$DomainNetBIOS\Cert Publishers|Allow|ReadProperty, WriteProperty|attributeSchema"
 
 # Convert csv baseline data to Object
-$DefaultBaseLine = $DefaultBaseLineCSVData | ConvertFrom-Csv;
+$DefaultBaseLine = $DefaultBaseLineCSVData | ConvertFrom-Csv -Delimiter "|";
 
 # Check if Comparison is needed (switch specified)
 if ($Compare)
@@ -9730,7 +9744,7 @@ if ($($differences | Measure-Object).Count -gt 0)
             }
         
         # show diff
-        $differences | select @{n='ExistsOnlyAt';e={if ($_.SideIndicator -eq "<=") {$FileIndication = "Current (Added)"} else {$FileIndication = "Previous (Removed)"};$fileIndication}},Account,AccessControlType,Permission,'PermissionType|Attribute' | ft -AutoSize
+        $differences | select @{n='ExistsOnlyAt';e={if ($_.SideIndicator -eq "<=") {$FileIndication = "Current (Added)"} else {$FileIndication = "Previous (Removed)"};$fileIndication}},Account,AccessControlType,Permission,'PermissionType-or-Attribute' | ft -AutoSize
 } else 
     {
         if ($Compare)
