@@ -1,6 +1,7 @@
 ﻿<# 
 Invoke-AdminSDHolderPermissionCheck - Analyzes AdminSDHolder permissions & compares with a previous run, to detect potential backdoor/excessive persistent permission(s).
 Comments to yossis@protonmail.com 
+v1.3 - Changed the default run to check against a default installation baseline of permissions (thanks AdiM for the feedback!)
 v1.2 - added Option to open the permissions in a Grid
 v1.1 - added Option to check Security event logs as well for event 5136 (usually not practical due to log retention, better collect in SIEM, yet can be helpful close to a suspicious attempt)
 #>
@@ -39,6 +40,7 @@ Analyzes current AdminSDHolder permissions & compares them with the data from th
 
 .NOTES
 Author: Yossi Sassi (@yossi_sassi), 10Root Cyber Security
+yossis@protonmail.com
 
 .LINK
 www.hacktivedirectory.com
@@ -54,11 +56,23 @@ param (
 function Compare-CSV {
     param (
         [string]$FilePath1,
-        [string]$FilePath2
+        [string]$FilePath2,
+        [switch]$CompareToOtherCSV,
+        [psobject]$BaseLineObj
     )
 
-    $csv1 = Get-Content $FilePath1 | ConvertFrom-Csv
-    $csv2 = Get-Content $FilePath2 | ConvertFrom-Csv
+    # Current run
+    $csv1 = Get-Content $FilePath1 | ConvertFrom-Csv;
+    
+    # Previous (to compare against)
+    if ($CompareToOtherCSV)
+        {
+            $csv2 = Get-Content $FilePath2 | ConvertFrom-Csv
+        }
+    else
+        {
+            $csv2 = $BaseLineObj
+        }
 
     $differences = @()
 
@@ -9654,20 +9668,80 @@ if ($Permissions)
         Write-Host $((Get-FileHash $CSVFile -Algorithm SHA256).hash) -ForegroundColor Magenta
 	}
 
+# Define default baseline
+$DomainNetBIOS = $ENV:USERDOMAIN;
+
+if ($DomainNetBIOS.Length -le 0)
+    {
+        $DomainNetBIOS = Read-Host "[!] Enter the NetBIOS Domain Name"    
+}
+
+$DefaultBaseLineCSVData = @();
+$DefaultBaseLineCSVData+='#TYPE Selected.System.DirectoryServices.ActiveDirectoryAccessRule';
+$DefaultBaseLineCSVData+="Account,AccessControlType,Permission,PermissionType|Attribute";
+$DefaultBaseLineCSVData+="NT AUTHORITY\Authenticated Users,Allow,GenericRead,00000000-0000-0000-0000-000000000000";
+$DefaultBaseLineCSVData+="NT AUTHORITY\SYSTEM,Allow,GenericAll,00000000-0000-0000-0000-000000000000";
+$DefaultBaseLineCSVData+="BUILTIN\Administrators,Allow,CreateChild,DeleteChild,Self,WriteProperty,ExtendedRight,Delete,GenericRead,WriteDacl,WriteOwner,00000000-0000-0000-0000-000000000000";
+$DefaultBaseLineCSVData+="$DomainNetBIOS\Domain Admins,Allow,CreateChild,DeleteChild,Self,WriteProperty,ExtendedRight,GenericRead,WriteDacl,WriteOwner,00000000-0000-0000-0000-000000000000";
+$DefaultBaseLineCSVData+="$DomainNetBIOS\Enterprise Admins,Allow,CreateChild,DeleteChild,Self,WriteProperty,ExtendedRight,GenericRead,WriteDacl,WriteOwner,00000000-0000-0000-0000-000000000000";
+$DefaultBaseLineCSVData+="Everyone,Allow,ExtendedRight,User-Change-Password";
+$DefaultBaseLineCSVData+="NT AUTHORITY\SELF,Allow,ReadProperty,WriteProperty,ExtendedRight,Private-Information";
+$DefaultBaseLineCSVData+="NT AUTHORITY\SELF,Allow,ExtendedRight,User-Change-Password";
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,RAS-Information";
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,RAS-Information";
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,User-Account-Restrictions";
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,General-Information";
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,Membership";
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,Membership";
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,GenericRead,00000000-0000-0000-0000-000000000000";
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,GenericRead,00000000-0000-0000-0000-000000000000";
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,General-Information";
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,User-Logon";
+$DefaultBaseLineCSVData+="BUILTIN\Pre-Windows 2000 Compatible Access,Allow,ReadProperty,User-Account-Restrictions";
+$DefaultBaseLineCSVData+="BUILTIN\Windows Authorization Access Group,Allow,ReadProperty,attributeSchema";
+$DefaultBaseLineCSVData+="BUILTIN\Terminal Server License Servers,Allow,ReadProperty,WriteProperty,attributeSchema";
+$DefaultBaseLineCSVData+="BUILTIN\Terminal Server License Servers,Allow,ReadProperty,WriteProperty,Terminal-Server-License-Server";
+$DefaultBaseLineCSVData+="$DomainNetBIOS\Cert Publishers,Allow,ReadProperty,WriteProperty,attributeSchema";
+
+# Convert csv baseline data to Object
+$DefaultBaseLine = $DefaultBaseLineCSVData | ConvertFrom-Csv;
+
 # Check if Comparison is needed (switch specified)
 if ($Compare)
     {
         # Compare the CSV files
-        $differences = Compare-CSV -FilePath1 $CSVFile -FilePath2 $PreviousCSVFile
-
-        # Display the differences
-        if ($differences.Count -gt 0) {
-            Write-Host "[!] CHANGES FOUND IN COMPARISON WITH PREVIOUS PERMISSIONS:" -ForegroundColor Yellow;
-            $differences | select @{n='ExistsOnlyAt';e={if ($_.SideIndicator -eq "<=") {$FileIndication = "Current (Added)"} else {$FileIndication = "Previous (Removed)"};$fileIndication}},Account,AccessControlType,Permission,'PermissionType|Attribute' | ft -AutoSize
-        } else {
-            Write-Host "[*] No differences found between the CSV files." -ForegroundColor DarkGreen
-        }
+        $differences = Compare-CSV -FilePath1 $CSVFile -FilePath2 $PreviousCSVFile -CompareToOtherCSV
     }
+else
+    {
+        $differences = Compare-CSV -FilePath1 $CSVFile -BaseLineObj $DefaultBaseLine
+    }
+
+# Display the differences
+if ($($differences | Measure-Object).Count -gt 0) 
+    {
+        if ($Compare)
+            {
+                Write-Host "[!] CHANGES FOUND IN COMPARISON WITH PREVIOUS PERMISSIONS:" -ForegroundColor Yellow
+            }
+        else
+            {
+                Write-Host "[!] CHANGES FOUND IN COMPARISON WITH DEFAULT BASELINE:" -ForegroundColor Yellow
+            }
+        
+        # show diff
+        $differences | select @{n='ExistsOnlyAt';e={if ($_.SideIndicator -eq "<=") {$FileIndication = "Current (Added)"} else {$FileIndication = "Previous (Removed)"};$fileIndication}},Account,AccessControlType,Permission,'PermissionType|Attribute' | ft -AutoSize
+} else 
+    {
+        if ($Compare)
+            {
+                Write-Host "[*] No differences found between the CSV files." -ForegroundColor Green
+            }
+        else
+            {
+                Write-Host "[*] No differences found compared to default baseline." -ForegroundColor Green
+            }
+}
 
 # If optional switch <OpenPermissionsInGrid> was specified
 If ($OpenPermissionsInGrid)
